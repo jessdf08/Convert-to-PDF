@@ -65,6 +65,8 @@
             try {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
+                
+                // Set our "Word Document" style margins here
                 const margin = 15;
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const pageHeight = doc.internal.pageSize.getHeight();
@@ -82,31 +84,33 @@
                     progressPercent.innerText = `${progress}%`;
 
                     const ret = await worker.recognize(files[i]);
-                    let extractedText = ret.data.text.trim();
+                    
+                    // NEW LOGIC: Use Tesseract's visual layout analysis
+                    const paragraphs = ret.data.paragraphs;
 
-                    if (extractedText) {
-                        // NEW LOGIC: Clean up the text
-                        // 1. Split text into paragraphs by looking for double newlines
-                        // 2. Remove single newlines inside those paragraphs and replace with spaces
-                        // 3. Rejoin the paragraphs with double newlines
-                        extractedText = extractedText
-                            .split(/\n\s*\n/)
-                            .map(paragraph => paragraph.replace(/\n/g, ' '))
-                            .join('\n\n');
+                    if (paragraphs && paragraphs.length > 0) {
+                        for (let p = 0; p < paragraphs.length; p++) {
+                            // Grab the text for this specific paragraph
+                            // Replace any internal physical line breaks with spaces
+                            let paraText = paragraphs[p].text.replace(/\n/g, ' ').trim();
+                            
+                            if (!paraText) continue;
 
-                        const lines = doc.splitTextToSize(extractedText, maxLineWidth);
-                        
-                        for (let j = 0; j < lines.length; j++) {
-                            if (cursorY + lineHeight > pageHeight - margin) {
-                                doc.addPage();
-                                cursorY = margin;
+                            // Now, tell jsPDF to reflow this paragraph to fit our margins
+                            const lines = doc.splitTextToSize(paraText, maxLineWidth);
+                            
+                            for (let j = 0; j < lines.length; j++) {
+                                if (cursorY + lineHeight > pageHeight - margin) {
+                                    doc.addPage();
+                                    cursorY = margin;
+                                }
+                                doc.text(lines[j], margin, cursorY);
+                                cursorY += lineHeight; // Next line
                             }
-                            doc.text(lines[j], margin, cursorY);
-                            cursorY += lineHeight;
+                            
+                            // Add a visual blank line after the paragraph finishes
+                            cursorY += lineHeight; 
                         }
-                        
-                        // Add extra space after each processed image
-                        cursorY += lineHeight * 2; 
                     }
                 }
 
