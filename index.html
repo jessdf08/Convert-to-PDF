@@ -57,14 +57,12 @@
                 return;
             }
 
-            // UI Reset
             convertBtn.disabled = true;
             progressContainer.classList.remove('hidden');
             errorOutput.classList.add('hidden');
             errorOutput.innerText = '';
             
             try {
-                // Initialize jsPDF
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
                 const margin = 15;
@@ -74,27 +72,31 @@
                 let cursorY = margin;
                 const lineHeight = 6;
 
-                // Initialize Tesseract Worker (Version 5 syntax)
                 statusText.innerText = "Warming up OCR engine...";
                 const worker = await Tesseract.createWorker('eng');
 
-                // Process sequentially to save mobile RAM
                 for (let i = 0; i < files.length; i++) {
                     statusText.innerText = `Extracting text from image ${i + 1} of ${files.length}...`;
                     const progress = Math.round(((i) / files.length) * 100);
                     progressBar.style.width = `${progress}%`;
                     progressPercent.innerText = `${progress}%`;
 
-                    // Run OCR
                     const ret = await worker.recognize(files[i]);
-                    const extractedText = ret.data.text.trim();
+                    let extractedText = ret.data.text.trim();
 
                     if (extractedText) {
-                        // REFLOW LOGIC: Split text to fit the page width
+                        // NEW LOGIC: Clean up the text
+                        // 1. Split text into paragraphs by looking for double newlines
+                        // 2. Remove single newlines inside those paragraphs and replace with spaces
+                        // 3. Rejoin the paragraphs with double newlines
+                        extractedText = extractedText
+                            .split(/\n\s*\n/)
+                            .map(paragraph => paragraph.replace(/\n/g, ' '))
+                            .join('\n\n');
+
                         const lines = doc.splitTextToSize(extractedText, maxLineWidth);
                         
                         for (let j = 0; j < lines.length; j++) {
-                            // Page break logic
                             if (cursorY + lineHeight > pageHeight - margin) {
                                 doc.addPage();
                                 cursorY = margin;
@@ -103,14 +105,13 @@
                             cursorY += lineHeight;
                         }
                         
-                        // Add some space between different images' texts
-                        cursorY += lineHeight; 
+                        // Add extra space after each processed image
+                        cursorY += lineHeight * 2; 
                     }
                 }
 
                 await worker.terminate();
 
-                // Finalize UI & Download
                 statusText.innerText = "Generating PDF...";
                 progressBar.style.width = "100%";
                 progressPercent.innerText = "100%";
