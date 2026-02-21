@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image to Reflowed PDF</title>
+    <title>Image to PDF Compiler</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen flex flex-col items-center justify-center p-4 font-sans text-gray-800">
 
     <div class="bg-white rounded-xl shadow-lg p-6 w-full max-w-md">
-        <h1 class="text-2xl font-bold text-center mb-4 text-blue-600">Reflow PDF Generator</h1>
+        <h1 class="text-2xl font-bold text-center mb-4 text-blue-600">Fast Image-to-PDF</h1>
         
-        <p class="text-sm text-gray-500 mb-6 text-center">Upload up to 200 images. We'll extract the text and flow it into a single PDF.</p>
+        <p class="text-sm text-gray-500 mb-6 text-center">Upload up to 200 images. We'll instantly compile them into a single PDF document, keeping original formatting perfectly intact.</p>
 
         <input type="file" id="imageInput" multiple accept="image/*" class="block w-full text-sm text-gray-500
             file:mr-4 file:py-2 file:px-4
@@ -24,12 +23,12 @@
         />
 
         <button id="convertBtn" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-            Start Conversion
+            Compile PDF
         </button>
 
         <div id="progressContainer" class="hidden mt-6">
             <div class="flex justify-between text-sm font-medium mb-1">
-                <span id="statusText">Initializing Engine...</span>
+                <span id="statusText">Processing Images...</span>
                 <span id="progressPercent">0%</span>
             </div>
             <div class="w-full bg-gray-200 rounded-full h-2.5">
@@ -49,6 +48,21 @@
         const progressPercent = document.getElementById('progressPercent');
         const errorOutput = document.getElementById('errorOutput');
 
+        // Helper function to read a file as an Image object
+        const readImage = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => resolve({ img, dataUrl: e.target.result });
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        };
+
         convertBtn.addEventListener('click', async () => {
             const files = imageInput.files;
             
@@ -64,63 +78,54 @@
             
             try {
                 const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
-                
-                // Set our "Word Document" style margins here
-                const margin = 15;
+                // Default PDF size is A4 (approx 210x297 mm)
+                const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const pageHeight = doc.internal.pageSize.getHeight();
-                const maxLineWidth = pageWidth - (margin * 2);
-                let cursorY = margin;
-                const lineHeight = 6;
-
-                statusText.innerText = "Warming up OCR engine...";
-                const worker = await Tesseract.createWorker('eng');
 
                 for (let i = 0; i < files.length; i++) {
-                    statusText.innerText = `Extracting text from image ${i + 1} of ${files.length}...`;
+                    statusText.innerText = `Adding image ${i + 1} of ${files.length}...`;
                     const progress = Math.round(((i) / files.length) * 100);
                     progressBar.style.width = `${progress}%`;
                     progressPercent.innerText = `${progress}%`;
 
-                    const ret = await worker.recognize(files[i]);
+                    // Load the image to get its original dimensions
+                    const { img, dataUrl } = await readImage(files[i]);
                     
-                    // NEW LOGIC: Use Tesseract's visual layout analysis
-                    const paragraphs = ret.data.paragraphs;
-
-                    if (paragraphs && paragraphs.length > 0) {
-                        for (let p = 0; p < paragraphs.length; p++) {
-                            // Grab the text for this specific paragraph
-                            // Replace any internal physical line breaks with spaces
-                            let paraText = paragraphs[p].text.replace(/\n/g, ' ').trim();
-                            
-                            if (!paraText) continue;
-
-                            // Now, tell jsPDF to reflow this paragraph to fit our margins
-                            const lines = doc.splitTextToSize(paraText, maxLineWidth);
-                            
-                            for (let j = 0; j < lines.length; j++) {
-                                if (cursorY + lineHeight > pageHeight - margin) {
-                                    doc.addPage();
-                                    cursorY = margin;
-                                }
-                                doc.text(lines[j], margin, cursorY);
-                                cursorY += lineHeight; // Next line
-                            }
-                            
-                            // Add a visual blank line after the paragraph finishes
-                            cursorY += lineHeight; 
-                        }
+                    // Calculate scaling to fit the image on the PDF page without stretching
+                    const imgRatio = img.width / img.height;
+                    const pageRatio = pageWidth / pageHeight;
+                    
+                    let finalWidth, finalHeight;
+                    
+                    if (imgRatio > pageRatio) {
+                        // Image is wider than the page
+                        finalWidth = pageWidth;
+                        finalHeight = pageWidth / imgRatio;
+                    } else {
+                        // Image is taller than the page
+                        finalHeight = pageHeight;
+                        finalWidth = pageHeight * imgRatio;
                     }
+
+                    // Center the image horizontally and vertically
+                    const x = (pageWidth - finalWidth) / 2;
+                    const y = (pageHeight - finalHeight) / 2;
+
+                    // If it's not the first image, add a new page
+                    if (i > 0) {
+                        doc.addPage();
+                    }
+
+                    // Add image to PDF (supports jpeg, png, etc.)
+                    doc.addImage(dataUrl, 'JPEG', x, y, finalWidth, finalHeight);
                 }
 
-                await worker.terminate();
-
-                statusText.innerText = "Generating PDF...";
+                statusText.innerText = "Finalizing PDF...";
                 progressBar.style.width = "100%";
                 progressPercent.innerText = "100%";
                 
-                doc.save('reflowed_document.pdf');
+                doc.save('compiled_images.pdf');
                 statusText.innerText = "Done! PDF Downloaded.";
 
             } catch (error) {
